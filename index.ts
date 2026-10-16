@@ -3,6 +3,7 @@ import { randomBytes } from "node:crypto";
 import { AssistantMessageEventStream, registerApiProvider } from "@earendil-works/pi-ai/compat";
 import { runOpenCode } from "./server";
 import { answerQuestions } from "./questions";
+import { answerPermission } from "./permissions";
 
 export function opencodeStreamSimple(model: any, context: any, options: any = {}, ui?: any) {
   const stream = new AssistantMessageEventStream();
@@ -85,7 +86,8 @@ export function opencodeStreamSimple(model: any, context: any, options: any = {}
       };
       if (model.reasoning && options.reasoning) body.variant = options.reasoning;
       const result = await runOpenCode(body, onEvent, options.signal,
-        ui ? (request, signal) => answerQuestions(ui, request, signal) : undefined);
+        ui ? (request, signal) => answerQuestions(ui, request, signal) : undefined,
+        ui ? (request, signal) => answerPermission(ui, request, signal) : undefined);
       // Reconcile the final response if its last SSE snapshot has not arrived yet.
       for (const part of result.parts ?? []) partUpdated(part);
       for (const id of blocks.keys()) finish(id);

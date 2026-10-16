@@ -21,6 +21,11 @@ models and credentials the `opencode` CLI is already configured with.
 - Interactive OpenCode `question.asked` events are surfaced through Pi's UI
   (`questions.ts`) and the answer is posted back; unanswered questions are
   rejected.
+- OpenCode permission requests (`permission.asked`, e.g. reading outside the
+  working directory) are surfaced through Pi's UI (`permissions.ts`) as
+  allow-once / allow-always / reject, and the reply is posted back before the
+  turn continues. Without a UI (non-interactive runs) requests are rejected
+  rather than left pending.
 - The server process and session are cleaned up on abort, completion, or error.
 
 ## Requirements

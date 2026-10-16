@@ -26,6 +26,7 @@ function executable() {
 export async function runOpenCode(
   body: any, onEvent: (event: any) => void, signal?: AbortSignal,
   onQuestion?: (request: any, signal: AbortSignal) => Promise<string[][] | undefined>,
+  onPermission?: (request: any, signal: AbortSignal) => Promise<"once" | "always" | "reject">,
 ) {
   signal?.throwIfAborted();
   const port = await availablePort();
@@ -56,6 +57,8 @@ export async function runOpenCode(
   let idleTimer: ReturnType<typeof setTimeout> | undefined;
   const questions = new Set<string>();
   const questionTasks = new Set<Promise<void>>();
+  const permissions = new Set<string>();
+  const permissionTasks = new Set<Promise<void>>();
   const activity = () => {
     if (idleTimer) clearTimeout(idleTimer);
     idleTimer = setTimeout(() => controller.abort(new Error("OpenCode: no progress for 10 minutes")), 600000);
@@ -117,8 +120,22 @@ export async function runOpenCode(
               }
               continue;
             }
-            if (event.type === "permission.asked") {
-              throw new Error(`OpenCode needs interactive input (${event.type}); open OpenCode to complete this operation.`);
+            if (event.type === "permission.asked" || event.type === "permission.v2.asked") {
+              if (!permissions.has(props.id)) {
+                permissions.add(props.id);
+                const task = (async () => {
+                  const reply = onPermission ? await onPermission(props, controller.signal) : "reject";
+                  controller.signal.throwIfAborted();
+                  const root = event.type === "permission.v2.asked" ? `/api/session/${sessionID}/permission` : "/permission";
+                  await request(`${root}/${encodeURIComponent(props.id)}/reply`, {
+                    method: "POST", body: JSON.stringify({ reply }),
+                  });
+                  activity();
+                })();
+                permissionTasks.add(task);
+                void task.catch(error => { if (!controller.signal.aborted) controller.abort(error); }).finally(() => permissionTasks.delete(task));
+              }
+              continue;
             }
             onEvent(event);
           }
@@ -151,7 +168,7 @@ export async function runOpenCode(
       method: "DELETE", headers, signal: AbortSignal.timeout(2000),
     }).catch(() => {});
     controller.abort();
-    await Promise.allSettled(questionTasks);
+    await Promise.allSettled([...questionTasks, ...permissionTasks]);
     if (child.pid && child.exitCode === null) {
       if (process.platform === "win32") {
         await new Promise<void>(resolve => execFile("taskkill", ["/PID", String(child.pid), "/T", "/F"], { windowsHide: true }, () => resolve()));
