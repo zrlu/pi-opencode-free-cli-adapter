@@ -1,0 +1,44 @@
+{
+  "name": "pi-opencode-free-cli-adapter",
+  "version": "0.1.0",
+  "description": "Pi extension that drives the OpenCode CLI (opencode serve) as a Pi model provider, streaming text/thinking and bridging interactive questions.",
+  "keywords": [
+    "pi",
+    "pi-package",
+    "pi-extension",
+    "opencode",
+    "opencode-cli",
+    "provider",
+    "adapter"
+  ],
+  "license": "MIT",
+  "author": "zrlu",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zrlu/pi-opencode-free-cli-adapter.git"
+  },
+  "homepage": "https://github.com/zrlu/pi-opencode-free-cli-adapter#readme",
+  "bugs": {
+    "url": "https://github.com/zrlu/pi-opencode-free-cli-adapter/issues"
+  },
+  "type": "module",
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "files": [
+    "index.ts",
+    "server.ts",
+    "questions.ts",
+    "README.md",
+    "LICENSE"
+  ],
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-ai": "*"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
