@@ -3,8 +3,8 @@ export async function answerQuestions(ui: any, request: any, signal: AbortSignal
   for (const question of request.questions) {
     const selected: string[] = [];
     const title = `${question.header}: ${question.question}`;
-    const custom = "✎ 自定义回答";
-    const done = "✓ 完成选择";
+    const custom = "✎ Custom answer";
+    const done = "✓ Done";
     while (true) {
       signal.throwIfAborted();
       const options = (question.options ?? []).filter((option: any) => !selected.includes(option.label));
@@ -15,7 +15,7 @@ export async function answerQuestions(ui: any, request: any, signal: AbortSignal
       if (choice === undefined) return undefined;
       if (choice === done) break;
       if (choice === custom) {
-        const value = await ui.input(title, "输入回答", { signal });
+        const value = await ui.input(title, "Enter answer", { signal });
         signal.throwIfAborted();
         if (value === undefined) return undefined;
         if (!value.trim()) continue;

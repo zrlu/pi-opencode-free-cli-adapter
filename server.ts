@@ -4,6 +4,10 @@ import { randomBytes } from "node:crypto";
 import { createServer } from "node:net";
 import { join } from "node:path";
 import { homedir } from "node:os";
+import { formatOpenCodeError, isHeaderTimeout, rateLimitError } from "./errors";
+
+const HEADER_TIMEOUT_RETRIES = 3;
+const HEADER_TIMEOUT_RETRY_DELAY = 1000;
 
 async function availablePort(): Promise<number> {
   const server = createServer();
@@ -64,9 +68,19 @@ export async function runOpenCode(
     idleTimer = setTimeout(() => controller.abort(new Error("OpenCode: no progress for 10 minutes")), 600000);
   };
   const request = async (path: string, init: any = {}) => {
-    const response = await fetch(base + path, { ...init, headers, signal: controller.signal });
-    if (!response.ok) throw new Error(`OpenCode HTTP ${response.status}: ${(await response.text()).slice(0, 1000)}`);
-    return response;
+    // A headers timeout is a local fetch artifact that has never affected the
+    // result, so retry it silently instead of surfacing an error.
+    for (let attempt = 0; ; attempt++) {
+      try {
+        const response = await fetch(base + path, { ...init, headers, signal: controller.signal });
+        if (!response.ok) throw formatOpenCodeError({ statusCode: response.status, message: `OpenCode HTTP ${response.status}`, responseBody: (await response.text()).slice(0, 4000) });
+        return response;
+      } catch (error) {
+        controller.signal.throwIfAborted();
+        if (!isHeaderTimeout(error) || attempt >= HEADER_TIMEOUT_RETRIES) throw error;
+        await new Promise(resolve => setTimeout(resolve, HEADER_TIMEOUT_RETRY_DELAY));
+      }
+    }
   };
   try {
     const deadline = Date.now() + 30000;
@@ -102,7 +116,12 @@ export async function runOpenCode(
             const props = event.properties ?? {};
             if ((props.sessionID ?? props.part?.sessionID ?? props.info?.sessionID) !== sessionID) continue;
             activity();
-            if (event.type === "session.error") throw new Error(JSON.stringify(props.error));
+            if (event.type === "session.error") throw formatOpenCodeError(props.error);
+            if (event.type === "session.status" && props.status?.type === "retry") {
+              const limited = rateLimitError(props.status.message, props.status.next);
+              // Surface a known limit immediately instead of waiting through hidden retries.
+              if (limited) throw limited;
+            }
             if (event.type === "question.asked" || event.type === "question.v2.asked") {
               if (!questions.has(props.id)) {
                 questions.add(props.id);
@@ -148,11 +167,13 @@ export async function runOpenCode(
     const result = await (await request(`/session/${sessionID}/message`, {
       method: "POST", body: JSON.stringify(body),
     })).json();
-    if (result.info?.error) throw new Error(JSON.stringify(result.info.error));
+    if (result.info?.error) throw formatOpenCodeError(result.info.error);
     controller.signal.throwIfAborted();
     return result;
   } catch (error) {
-    throw controller.signal.aborted ? controller.signal.reason : error;
+    const reason = controller.signal.aborted ? controller.signal.reason : error;
+    if (signal?.aborted) throw reason;
+    throw formatOpenCodeError(reason);
   } finally {
     if (idleTimer) clearTimeout(idleTimer);
     signal?.removeEventListener("abort", abort);

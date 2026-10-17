@@ -3,7 +3,7 @@ import { randomBytes } from "node:crypto";
 import { AssistantMessageEventStream, registerApiProvider } from "@earendil-works/pi-ai/compat";
 import { runOpenCode } from "./server";
 import { answerQuestions } from "./questions";
-import { answerPermission } from "./permissions";
+import { answerPermission, loadPermissionMode, savePermissionMode, type PermissionMode } from "./permissions";
 
 export function opencodeStreamSimple(model: any, context: any, options: any = {}, ui?: any) {
   const stream = new AssistantMessageEventStream();
@@ -87,7 +87,7 @@ export function opencodeStreamSimple(model: any, context: any, options: any = {}
       if (model.reasoning && options.reasoning) body.variant = options.reasoning;
       const result = await runOpenCode(body, onEvent, options.signal,
         ui ? (request, signal) => answerQuestions(ui, request, signal) : undefined,
-        ui ? (request, signal) => answerPermission(ui, request, signal) : undefined);
+        (request, signal) => answerPermission(ui, request, signal));
       // Reconcile the final response if its last SSE snapshot has not arrived yet.
       for (const part of result.parts ?? []) partUpdated(part);
       for (const id of blocks.keys()) finish(id);
@@ -107,8 +107,59 @@ export function opencodeStreamSimple(model: any, context: any, options: any = {}
 export default function (pi: ExtensionAPI) {
   let ui: any;
   for (const event of ["session_start", "before_agent_start", "model_select"] as const) {
-    pi.on?.(event as any, (_event: any, ctx: any) => { ui = ctx.hasUI ? ctx.ui : undefined; });
+    pi.on?.(event as any, (event: any, ctx: any) => {
+      ui = ctx.hasUI ? ctx.ui : undefined;
+      showMode(ctx, event.model ?? ctx.model);
+    });
   }
   const run = (model: any, context: any, options: any) => opencodeStreamSimple(model, context, options, ui);
   registerApiProvider({ api: "opencode-free-api", stream: run, streamSimple: run }, "local-opencode-free");
+
+  const modes: PermissionMode[] = ["allow", "ask", "reject"];
+  const labels: Record<PermissionMode, string> = {
+    allow: "✓ Always allow (no prompt)",
+    ask: "? Ask every time",
+    reject: "✗ Reject all",
+  };
+  const showMode = (ctx: any, model = ctx.model) => {
+    if (!ctx.hasUI) return;
+    if (model?.api !== "opencode-free-api" && model?.provider !== "local-opencode-free") {
+      ctx.ui.setStatus?.("opencode-permit", undefined);
+      return;
+    }
+    const mode = loadPermissionMode();
+    const color = mode === "allow" ? "success" : mode === "reject" ? "error" : "muted";
+    // Publish a status; replacing the footer hides other extensions' layouts.
+    ctx.ui.setStatus?.("opencode-permit", ctx.ui.theme.fg(color, `oc-permit:${mode}`));
+  };
+  async function chooseMode(ctx: any): Promise<PermissionMode | undefined> {
+    const current = loadPermissionMode();
+    const choices = modes.map(mode => `${labels[mode]}${mode === current ? "  ← current" : ""}`);
+    const choice = await ctx.ui.select(`OpenCode permission mode (current: ${current})`, choices);
+    if (choice === undefined) return undefined;
+    return modes[choices.indexOf(choice)];
+  }
+  pi.registerCommand?.("opencode-permit", {
+    description: "Set OpenCode permission auto-answer mode (global, persisted; allow/ask/reject)",
+    getArgumentCompletions: (prefix: string) => {
+      const filtered = modes.filter(mode => mode.startsWith(prefix));
+      return filtered.length ? filtered.map(mode => ({ value: mode, label: mode })) : null;
+    },
+    handler: async (args: string, ctx: any) => {
+      const notify = (message: string, level: string) => { if (ctx.hasUI) ctx.ui.notify(message, level); };
+      const arg = args.trim().toLowerCase();
+      let mode: PermissionMode | undefined;
+      if (arg) {
+        if (arg === "allow" || arg === "ask" || arg === "reject") mode = arg;
+        else { notify(`Unknown mode "${arg}" (expected allow/ask/reject)`, "error"); return; }
+      } else {
+        if (!ctx.hasUI) { notify(`Current mode: ${loadPermissionMode()}`, "info"); return; }
+        mode = await chooseMode(ctx);
+      }
+      if (!mode) return;
+      savePermissionMode(mode);
+      notify(`OpenCode permission mode = ${labels[mode]} (global · persisted)`, "info");
+      showMode(ctx);
+    },
+  });
 }

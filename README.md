@@ -27,6 +27,12 @@ models and credentials the `opencode` CLI is already configured with.
   turn continues. Without a UI (non-interactive runs) requests are rejected
   rather than left pending.
 - The server process and session are cleaned up on abort, completion, or error.
+- Upstream rate limits are surfaced immediately from HTTP errors, session errors,
+  or OpenCode's retry-status events, instead of waiting through hidden retries
+  until a generic `fetch failed`. Local connection and HTTP timeout errors retain
+  their underlying cause and are not mislabeled as rate limits. A local
+  `UND_ERR_HEADERS_TIMEOUT` is retried silently a few times before being
+  surfaced, since it has not been observed to affect results.
 
 ## Requirements
 
